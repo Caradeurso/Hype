@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HYPE – Salas de evento</title>
+<meta name="theme-color" content="#7c3aed"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg">
+<style>
+:root{--bg:#fff;--card:#f4f1fb;--tx:#1b1530;--mut:#6b6480;--pri:#7c3aed;--bd:#e2dcf1;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#120d1f;--card:#1d1630;--tx:#f3effc;--mut:#a79fc0;--bd:#2e2548;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:520px;margin:0 auto;padding:14px 14px 90px}
+h1{margin:0;font-size:24px;background:linear-gradient(90deg,#7c3aed,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent}
+h3{margin:0 0 8px}.mut{color:var(--mut);font-size:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin:10px 0}.card[data-a]{cursor:pointer}
+input,textarea{width:100%;box-sizing:border-box;padding:11px;margin:5px 0;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);font:inherit}
+input[hidden]{display:none}
+.btn{background:var(--pri);color:#fff;border:0;border-radius:10px;padding:11px 14px;font:inherit;font-weight:600;cursor:pointer}
+.btn.alt{background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;padding:14px;border:0;background:none;color:var(--mut);font:inherit;font-weight:600;cursor:pointer}nav button.on{color:var(--pri)}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:9}
+.ov>div{background:var(--bg);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:90%;overflow:auto;box-sizing:border-box}
+#msgs{max-height:40vh;overflow:auto}
+.m{margin:6px 0;padding:8px 10px;border-radius:12px;background:var(--card);max-width:85%}.m.me{background:var(--pri);color:#fff;margin-left:auto}.m small{display:block;opacity:.7}
+.chip{display:inline-block;background:var(--card);border:1px solid var(--bd);border-radius:20px;padding:3px 10px;margin:2px;font-size:14px}
+.sw{display:flex;gap:8px;align-items:center;margin:8px 0}.sw input{width:auto}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:90px;background:#222;color:#fff;padding:9px 14px;border-radius:20px;z-index:10;display:none;font-size:14px}
+</style></head><body>
+<div id="app"><h1>🔥 HYPE</h1>
+<input id="nm" placeholder="Seu nome (aparece nas salas)" maxlength="30">
+<div id="main"><p class="mut">Carregando…</p></div></div>
+<nav><button id="t1" class="on" data-a="tab" data-v="rooms">🔥 Salas</button><button id="t2" data-a="tab" data-v="secret">🔒 Secretas</button></nav>
+<div id="toast"></div>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {getAuth,signInAnonymously,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {getFirestore,doc,setDoc,addDoc,collection,query,where,orderBy,limit,onSnapshot,Timestamp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import {getFunctions,httpsCallable} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js";
+import {firebaseConfig} from "./firebase-config.js";
+
+const fb=initializeApp(firebaseConfig),auth=getAuth(fb),db=getFirestore(fb),fns=getFunctions(fb);
+const $=s=>document.querySelector(s);
+const esc=t=>String(t==null?'':t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const code=()=>Array.from({length:6},()=>"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random()*32)]).join('');
+const fmt=t=>new Date(t).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'});
+const fmtT=ms=>{const s=Math.max(0,Math.floor(ms/1000)),d=Math.floor(s/86400);return (d?d+'d ':'')+[Math.floor(s%86400/3600),Math.floor(s%3600/60),s%60].map(n=>String(n).padStart(2,'0')).join(':')};
+async function sha(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('hype:'+s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+const mine=()=>{try{return JSON.parse(ls.get('hype_mine')||'[]')}catch(e){return[]}};
+function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',2800)}
+let uid,name=ls.get('hype_name')||'',tab='rooms',cur=null,un=[],tick=null,started=false;
+let pubR=[],myR=[],mySec=[];const jR={},jS={},watched=new Set();
+$('#nm').value=name;$('#nm').addEventListener('change',e=>{name=e.target.value.trim();ls.set('hype_name',name)});
+const A={};document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(t&&A[t.dataset.a])A[t.dataset.a](t.dataset.v,t)});
+const needName=()=>{name=$('#nm').value.trim();ls.set('hype_name',name);if(!name){toast('Digite seu nome no topo');$('#nm').focus();return false}return true};
+function modal(h){closeM();const o=document.createElement('div');o.className='ov';o.id='ov';o.innerHTML='<div>'+h+'<button class="btn alt" style="width:100%;margin-top:8px" data-a="closeM">Cancelar</button></div>';document.body.appendChild(o)}
+const closeM=()=>{const o=$('#ov');if(o)o.remove()};A.closeM=closeM;
+const live=r=>r.expiresAt&&r.expiresAt.toMillis()>Date.now();
+const snap=(ref,fn)=>onSnapshot(ref,fn,()=>{});
+
+function addMine(id){const m=mine();if(!m.includes(id)){m.push(id);ls.set('hype_mine',JSON.stringify(m.slice(-40)))}watch(id)}
+function watch(id){if(watched.has(id))return;watched.add(id);
+  snap(doc(db,'rooms',id),s=>{if(s.exists())jR[id]={id,...s.data()};else delete jR[id];drawList()});
+  snap(doc(db,'secret',id),s=>{if(s.exists())jS[id]={id,...s.data()};else delete jS[id];drawList()})}
+
+function home(){cur=null;un.forEach(f=>f());un=[];clearInterval(tick);const r=tab==='rooms';
+  $('#main').innerHTML=`<div class="row" style="margin:10px 0"><button class="btn" data-a="${r?'newRoom':'newSec'}">${r?'+ Criar sala':'+ Sala secreta (2h)'}</button><button class="btn alt" data-a="${r?'joinRoom':'joinSec'}">Entrar com código</button></div><div id="list"></div>`;
+  $('#t1').className=r?'on':'';$('#t2').className=r?'':'on';drawList()}
+function drawList(){if(cur)return;const el=$('#list');if(!el)return;
+  if(tab==='rooms'){const m=new Map();[...pubR,...myR,...Object.values(jR)].forEach(x=>m.set(x.id,x));
+    const L=[...m.values()].filter(live).sort((a,b)=>b.created-a.created);
+    el.innerHTML=L.length?L.map(r=>`<div class="card" data-a="openRoom" data-v="${esc(r.id)}"><b>${r.pub?'🌐':'🔒'} ${esc(r.name)}</b><div class="mut">${esc(r.whenText||'')} ${esc(r.place||'')}</div><div class="mut">por ${esc(r.ownerName)} · encerra ${fmt(r.expiresAt.toMillis())}</div></div>`).join(''):'<p class="mut">Nenhuma sala ativa. Crie a primeira e comece o HYPE!</p>'}
+  else{const m=new Map();[...mySec,...Object.values(jS)].forEach(x=>m.set(x.id,x));
+    const L=[...m.values()].filter(live);
+    el.innerHTML=L.length?L.map(s=>`<div class="card" data-a="openSec" data-v="${esc(s.id)}"><b>🔒 ${esc(s.name)}</b><div class="mut">Código ${esc(s.id)} · apaga em ${fmtT(s.expiresAt.toMillis()-Date.now())}</div></div>`).join(''):'<p class="mut">Nenhuma conversa secreta ativa. Elas se apagam sozinhas.</p>'}}
+A.tab=v=>{tab=v;home()};
+
+// ---------- salas de HYPE ----------
+A.newRoom=()=>{if(!needName())return;modal(`<h3>Nova sala de HYPE</h3><input id="f1" placeholder="Nome do evento ou bar" maxlength="60"><textarea id="f2" rows="2" placeholder="Descrição (atrações, dress code…)"></textarea><input id="f3" type="datetime-local"><input id="f4" placeholder="Local" maxlength="60"><label class="sw"><input id="f5" type="checkbox" checked data-a="tgl"> Sala aberta ao público</label><input id="f6" type="password" placeholder="Senha (só convidados entram)" hidden><label class="mut">Quanto tempo a sala fica ativa? (horas, de 1 a 720)</label><input id="f7" type="number" min="1" max="720" value="24"><button class="btn" style="width:100%" data-a="saveRoom">Criar sala</button>`)};
+A.tgl=()=>{$('#f6').hidden=$('#f5').checked};
+A.saveRoom=async()=>{const n=$('#f1').value.trim(),pub=$('#f5').checked,pw=$('#f6').value,h=parseInt($('#f7').value,10),w=$('#f3').value;
+  if(!n)return toast('Dê um nome à sala');if(!pub&&!pw)return toast('Defina uma senha');if(!(h>=1&&h<=720))return toast('Duração: de 1 a 720 horas');
+  const id=code();
+  try{await setDoc(doc(db,'rooms',id),{name:n,desc:$('#f2').value.trim(),place:$('#f4').value.trim(),whenText:w?fmt(w):'',pub,pw:pub?'':await sha(pw),owner:uid,ownerName:name,created:Date.now(),expiresAt:Timestamp.fromMillis(Date.now()+h*3600000)});closeM();openRoom(id)}catch(e){toast('Erro ao criar a sala')}};
+A.joinRoom=(v)=>{modal(`<h3>Entrar em uma sala</h3><input id="f1" placeholder="Código da sala" maxlength="6" style="text-transform:uppercase"><input id="f2" type="password" placeholder="Senha (se a sala tiver)"><button class="btn" style="width:100%" data-a="doJoinRoom">Entrar</button>`);if(typeof v==='string'&&v)$('#f1').value=v};
+A.doJoinRoom=async()=>{if(!needName())return;const id=$('#f1').value.trim().toUpperCase();
+  try{await setDoc(doc(db,`rooms/${id}/members/${uid}`),{uid,pw:await sha($('#f2').value)});addMine(id);closeM();openRoom(id)}catch(e){toast('Sala não encontrada, encerrada ou senha incorreta')}};
+A.openRoom=id=>{cur={id,kind:'room',exp:0};
+  $('#main').innerHTML=`<button class="btn alt" data-a="back">← Voltar</button><div class="card" id="rh">Carregando…</div><b>Você vai?</b><div class="row" style="margin:6px 0"><button class="btn" data-a="hy" data-v="vou">🔥 Vou!</button><button class="btn alt" data-a="hy" data-v="talvez">🤔 Talvez</button><button class="btn alt" data-a="hy" data-v="nao">❌ Não</button></div><div id="hype" class="mut"></div><h3 style="margin-top:16px">Bate-papo da sala</h3><div id="msgs"></div><div class="row"><input id="tx" placeholder="Mande um recado…" maxlength="300" style="flex:4"><button class="btn" data-a="send">Enviar</button></div>`;
+  un.push(onSnapshot(doc(db,'rooms',id),s=>{if(!s.exists()){toast('Sala encerrada ou excluída');return home()}const r=s.data();cur.exp=r.expiresAt.toMillis();
+    $('#rh').innerHTML=`<h3>${r.pub?'🌐':'🔒'} ${esc(r.name)}</h3><div>${esc(r.desc)}</div><div class="mut">${esc(r.whenText||'')} · ${esc(r.place||'')}</div><div class="mut">por ${esc(r.ownerName)}</div><div style="margin-top:6px">Encerra em <b id="cd"></b></div><div class="mut">Código: <b>${esc(id)}</b></div><div class="row" style="margin-top:8px"><button class="btn alt" data-a="share">Compartilhar convite</button>${r.owner===uid?'<button class="btn alt" data-a="del">Excluir sala</button>':''}</div>`;cd()},()=>{toast('Sem acesso a esta sala');home()}));
+  un.push(snap(collection(db,`rooms/${id}/hype`),s=>{const g={vou:[],talvez:[],nao:[]};s.docs.forEach(d=>{const x=d.data();if(g[x.status])g[x.status].push(x.name)});const el=$('#hype');if(!el)return;
+    el.innerHTML=`<div><b>🔥 ${g.vou.length} confirmados</b> ${g.vou.map(n=>`<span class="chip">${esc(n)}</span>`).join('')}</div><div>🤔 ${g.talvez.length} talvez</div><div>❌ ${g.nao.length} não vão</div>`}));
+  chat(`rooms/${id}/msgs`);tick=setInterval(cd,1000)};
+function cd(){if(!cur||!cur.exp)return;const l=cur.exp-Date.now();if(l<=0){toast('Sala encerrada');return home()}const e=$('#cd');if(e)e.textContent=fmtT(l)}
+A.hy=async v=>{if(!needName())return;try{await setDoc(doc(db,`rooms/${cur.id}/hype/${uid}`),{name,status:v});toast(v==='vou'?'Presença confirmada! 🔥':'Resposta salva')}catch(e){toast('Sala encerrada ou sem permissão')}};
+A.share=async()=>{const sec=cur.kind==='secret',url=location.origin+location.pathname+'#'+(sec?'s-':'')+cur.id;
+  try{if(navigator.share)await navigator.share({title:'HYPE',text:'Te convidei para uma sala no HYPE 🔥 Código: '+cur.id,url});else{await navigator.clipboard.writeText(url);toast('Link copiado!')}}catch(e){}};
+A.del=()=>modal(`<h3>Excluir esta sala?</h3><p>A sala, as confirmações e o chat serão apagados para todos. Só o dono pode fazer isso.</p><button class="btn" style="width:100%" data-a="del2">Excluir agora</button>`);
+A.del2=async()=>{try{await httpsCallable(fns,'deleteRoom')({id:cur.id});closeM();toast('Sala excluída');home()}catch(e){toast('Só o dono pode excluir a sala')}};
+A.back=home;
+
+// ---------- chat ----------
+function chat(path){cur.path=path;
+  un.push(snap(query(collection(db,path),orderBy('ts','desc'),limit(100)),s=>{const el=$('#msgs');if(!el)return;const L=s.docs.map(d=>d.data()).reverse();
+    el.innerHTML=L.map(m=>`<div class="m ${m.uid===uid?'me':''}"><small>${esc(m.name)}</small>${esc(m.text)}</div>`).join('')||'<p class="mut">Seja o primeiro a falar.</p>';el.scrollTop=el.scrollHeight}));
+  $('#tx').addEventListener('keydown',e=>{if(e.key==='Enter')A.send()})}
+A.send=async()=>{const t=$('#tx').value.trim();if(!t||!needName())return;$('#tx').value='';
+  try{await addDoc(collection(db,cur.path),{uid,name,text:t,ts:Date.now()})}catch(e){toast('Não foi possível enviar (sala encerrada?)')}};
+
+// ---------- salas secretas ----------
+A.newSec=()=>{if(!needName())return;modal(`<h3>Sala secreta</h3><p class="mut">A conversa dura 2 horas e depois é apagada. Só entra quem tiver o código. Para continuar, quem criou paga.</p><input id="f1" placeholder="Nome da conversa" maxlength="40"><button class="btn" style="width:100%" data-a="saveSec">Criar por 2h</button>`)};
+A.saveSec=async()=>{const n=$('#f1').value.trim();if(!n)return toast('Dê um nome');const id=code();
+  try{await setDoc(doc(db,'secret',id),{name:n,owner:uid,ownerName:name,created:Date.now(),expiresAt:Timestamp.fromMillis(Date.now()+7200000)});addMine(id);closeM();A.openSec(id)}catch(e){toast('Erro ao criar a sala')}};
+A.joinSec=v=>{modal(`<h3>Entrar na sala secreta</h3><input id="f1" placeholder="Código" maxlength="6" style="text-transform:uppercase"><button class="btn" style="width:100%" data-a="doJoinSec">Entrar</button>`);if(typeof v==='string'&&v)$('#f1').value=v};
+A.doJoinSec=()=>{if(!needName())return;const id=$('#f1').value.trim().toUpperCase();addMine(id);closeM();A.openSec(id)};
+A.openSec=id=>{cur={id,kind:'secret',exp:0};
+  $('#main').innerHTML=`<button class="btn alt" data-a="back">← Voltar</button><div class="card" id="rh">Carregando…</div><div id="msgs"></div><div class="row"><input id="tx" placeholder="Mensagem…" maxlength="300" style="flex:4"><button class="btn" data-a="send">Enviar</button></div>`;
+  un.push(onSnapshot(doc(db,'secret',id),s=>{if(!s.exists()){toast('Sala não encontrada ou já apagada');return home()}const r=s.data();cur.exp=r.expiresAt.toMillis();
+    $('#rh').innerHTML=`<h3>🔒 ${esc(r.name)}</h3><div>Apaga em <b id="cd"></b></div><div class="mut">Código: <b>${esc(id)}</b> · criada por ${esc(r.ownerName)}</div><div class="row" style="margin-top:8px"><button class="btn alt" data-a="share">Compartilhar convite</button>${r.owner===uid?'<button class="btn" data-a="pay">Continuar a conversa (R$ 9,90)</button>':''}</div>`;cd()},()=>{toast('Sala não encontrada');home()}));
+  chat(`secret/${id}/msgs`);tick=setInterval(cd,1000)};
+A.pay=()=>modal(`<h3>Continuar a conversa</h3><p>Estender esta sala por mais 24h custa <b>R$ 9,90</b>.</p><p class="mut">Pagamento ainda simulado nesta versão. Antes de abrir ao público, ligue Pix ou cartão (veja o README).</p><button class="btn" style="width:100%" data-a="paid">Confirmar</button>`);
+A.paid=async()=>{try{await httpsCallable(fns,'extendSecret')({id:cur.id});closeM();toast('Sala estendida por 24h')}catch(e){toast('Falha ao estender')}};
+
+// ---------- início ----------
+function start(){if(started)return;started=true;home();
+  snap(query(collection(db,'rooms'),where('pub','==',true)),s=>{pubR=s.docs.map(d=>({id:d.id,...d.data()}));drawList()});
+  snap(query(collection(db,'rooms'),where('owner','==',uid)),s=>{myR=s.docs.map(d=>({id:d.id,...d.data()}));drawList()});
+  snap(query(collection(db,'secret'),where('owner','==',uid)),s=>{mySec=s.docs.map(d=>({id:d.id,...d.data()}));drawList()});
+  mine().forEach(watch);setInterval(drawList,30000);
+  const h=location.hash.slice(1).toUpperCase();if(h){history.replaceState(null,'',location.pathname);h.startsWith('S-')?A.joinSec(h.slice(2)):A.joinRoom(h)}}
+onAuthStateChanged(auth,u=>{if(u){uid=u.uid;start()}else signInAnonymously(auth).catch(()=>{$('#main').innerHTML='<p class="mut">Não foi possível entrar. Ative o login Anônimo no Firebase e confira o firebase-config.js.</p>'})});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script></body></html>

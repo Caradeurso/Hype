@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function me() { return request.auth != null; }
+    function room(id) { return get(/databases/$(db)/documents/rooms/$(id)).data; }
+    function roomOpen(id) { return room(id).expiresAt > request.time; }
+
+    match /rooms/{id} {
+      allow list: if me() && (resource.data.pub == true || resource.data.owner == request.auth.uid);
+      allow get: if me() && resource.data.expiresAt > request.time
+                 && (resource.data.pub == true || resource.data.owner == request.auth.uid
+                     || exists(/databases/$(db)/documents/rooms/$(id)/members/$(request.auth.uid)));
+      allow create: if me() && request.resource.data.owner == request.auth.uid
+                    && request.resource.data.expiresAt > request.time
+                    && request.resource.data.expiresAt < request.time + duration.value(31, 'd');
+      // Sem update/delete pelo app: a exclusão antecipada é feita pela função deleteRoom, só para o dono.
+      allow update, delete: if false;
+      match /members/{u} {
+        allow read: if me();
+        allow create, update: if me() && u == request.auth.uid && roomOpen(id)
+                              && (room(id).pub == true || request.resource.data.pw == room(id).pw);
+      }
+      match /hype/{u} { allow read: if me(); allow write: if me() && u == request.auth.uid && roomOpen(id); }
+      match /msgs/{m} { allow read: if me(); allow create: if me() && request.resource.data.uid == request.auth.uid && roomOpen(id); }
+    }
+
+    match /secret/{id} {
+      allow get: if me();
+      allow list: if me() && resource.data.owner == request.auth.uid;
+      allow create: if me() && request.resource.data.owner == request.auth.uid;
+      match /msgs/{m} {
+        allow read: if me() && get(/databases/$(db)/documents/secret/$(id)).data.expiresAt > request.time;
+        allow create: if me() && request.resource.data.uid == request.auth.uid
+                      && get(/databases/$(db)/documents/secret/$(id)).data.expiresAt > request.time;
+      }
+    }
+  }
+}

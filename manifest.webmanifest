@@ -1,0 +1,3 @@
+{ "name": "HYPE – Salas de evento", "short_name": "HYPE", "start_url": ".", "display": "standalone",
+  "background_color": "#120d1f", "theme_color": "#7c3aed",
+  "icons": [ { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" } ] }
